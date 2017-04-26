@@ -171,9 +171,9 @@ class TestES(ESTestCaseWithAddons):
         qs = Addon.search().filter(type=1, or_={'status': 1, 'app': 2})
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
-        # {'and': [
+        # {'must': [
         #     {'term': {'type': 1}},
-        #     {'or': [{'term': {'status': 1}}, {'term': {'app': 2}}]},
+        #     {'should': [{'term': {'status': 1}}, {'term': {'app': 2}}]},
         # ]}
         assert filters.keys() == ['must']
         assert {'term': {'type': 1}} in filters['must']
@@ -216,7 +216,7 @@ class TestES(ESTestCaseWithAddons):
         qs = Addon.search().filter(type__in=[1, 2], status__gte=4)
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
-        # {'and': [
+        # {'must': [
         #     {'terms': {'type': [1, 2]}},
         #     {'range': {'status': {'gte': 4}}},
         # ]}
@@ -228,7 +228,7 @@ class TestES(ESTestCaseWithAddons):
         qs = Addon.search().filter(type__in=[1, 2], status__lte=4)
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
-        # {'and': [
+        # {'must': [
         #     {'terms': {'type': [1, 2]}},
         #     {'range': {'status': {'lte': 4}}},
         # ]}
@@ -240,7 +240,7 @@ class TestES(ESTestCaseWithAddons):
         qs = Addon.search().filter(type__in=[1, 2], status__gt=4)
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
-        # {'and': [
+        # {'must': [
         #     {'terms': {'type': [1, 2]}},
         #     {'range': {'status': {'gt': 4}}},
         # ]}
@@ -252,7 +252,7 @@ class TestES(ESTestCaseWithAddons):
         qs = Addon.search().filter(type__in=[1, 2], status__lt=4)
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
-        # {'and': [
+        # {'must': [
         #     {'range': {'status': {'lt': 4}}},
         #     {'terms': {'type': [1, 2]}},
         # ]}
