@@ -94,7 +94,7 @@ class TestES(ESTestCaseWithAddons):
         assert {'range': {'status': {'gte': 1}}} in query['bool']['must']
 
     def test_query_or(self):
-        qs = Addon.search().query(or_=dict(type=1, status__gte=2))
+        qs = Addon.search().query(or_={'type': 1, 'status__gte': 2})
         query = qs._build_query()['query']['function_score']['query']
         # Query:
         # {'bool': {'should': [{'term': {'type': 1}},
@@ -105,7 +105,9 @@ class TestES(ESTestCaseWithAddons):
         assert {'range': {'status': {'gte': 2}}} in query['bool']['should']
 
     def test_query_or_and(self):
-        qs = Addon.search().query(or_=dict(type=1, status__gte=2), category=2)
+        qs = Addon.search().query(
+            or_={'type': 1, 'status__gte': 2},
+            category=2)
         query = qs._build_query()['query']['function_score']['query']
         # Query:
         # {'bool': {'must': [{'term': {'category': 2}},
@@ -124,7 +126,7 @@ class TestES(ESTestCaseWithAddons):
 
     def test_query_fuzzy(self):
         fuzz = {'boost': 2, 'value': 'woo'}
-        qs = Addon.search().query(or_=dict(type=1, status__fuzzy=fuzz))
+        qs = Addon.search().query(or_={'type': 1, 'status__fuzzy': fuzz})
         query = qs._build_query()['query']['function_score']['query']
         # Query:
         # {'bool': {'should': [{'fuzzy': {'status': fuzz}},
@@ -152,7 +154,7 @@ class TestES(ESTestCaseWithAddons):
         assert qs._build_query()['size'] == 7
 
     def test_filter_or(self):
-        qs = Addon.search().filter(type=1).filter(or_=dict(status=1, app=2))
+        qs = Addon.search().filter(type=1).filter(or_={'status': 1, 'app': 2})
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
         # {'must': [
@@ -166,7 +168,7 @@ class TestES(ESTestCaseWithAddons):
         assert {'term': {'status': 1}} in should_clause['should']
         assert {'term': {'app': 2}} in should_clause['should']
 
-        qs = Addon.search().filter(type=1, or_=dict(status=1, app=2))
+        qs = Addon.search().filter(type=1, or_={'status': 1, 'app': 2})
         filters = qs._build_query()['query']['bool']['filter']['bool']
         # Filters:
         # {'and': [
