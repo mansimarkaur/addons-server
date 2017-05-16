@@ -17,7 +17,6 @@ from django.utils.translation import ugettext as _, ugettext_lazy as _lazy
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
-import waffle
 from django_statsd.clients import statsd
 from PIL import Image
 
@@ -794,15 +793,14 @@ def json_upload_detail(request, upload, addon_slug=None):
         else:
             app_ids = set([a.id for a in pkg.get('apps', [])])
             supported_platforms = []
-            for app in (amo.MOBILE, amo.ANDROID):
-                if app.id in app_ids:
-                    supported_platforms.extend((amo.PLATFORM_ANDROID.id,))
-                    app_ids.remove(app.id)
+            if amo.ANDROID.id in app_ids:
+                supported_platforms.extend((amo.PLATFORM_ANDROID.id,))
+                app_ids.remove(amo.ANDROID.id)
             if len(app_ids):
                 # Targets any other non-mobile app:
                 supported_platforms.extend(amo.DESKTOP_PLATFORMS.keys())
-            s = amo.SUPPORTED_PLATFORMS.keys()
-            plat_exclude = set(s) - set(supported_platforms)
+            plat_exclude = (
+                set(amo.SUPPORTED_PLATFORMS.keys()) - set(supported_platforms))
             plat_exclude = [str(p) for p in plat_exclude]
 
             # Does the version number look like it's beta?
@@ -1115,14 +1113,8 @@ def version_edit(request, addon_id, addon, version_id):
         if 'approvalnotes' in version_form.changed_data:
             if version.has_info_request:
                 version.update(has_info_request=False)
-                if waffle.switch_is_active('activity-email'):
-                    log_and_notify(amo.LOG.APPROVAL_NOTES_CHANGED,
-                                   None,
-                                   request.user,
-                                   version)
-                else:
-                    ActivityLog.create(amo.LOG.APPROVAL_NOTES_CHANGED,
-                                       addon, version, request.user)
+                log_and_notify(amo.LOG.APPROVAL_NOTES_CHANGED, None,
+                               request.user, version)
             else:
                 ActivityLog.create(amo.LOG.APPROVAL_NOTES_CHANGED,
                                    addon, version, request.user)
@@ -1132,14 +1124,8 @@ def version_edit(request, addon_id, addon, version_id):
             addon.update(admin_review=True)
             if version.has_info_request:
                 version.update(has_info_request=False)
-                if waffle.switch_is_active('activity-email'):
-                    log_and_notify(amo.LOG.SOURCE_CODE_UPLOADED,
-                                   None,
-                                   request.user,
-                                   version)
-                else:
-                    ActivityLog.create(amo.LOG.SOURCE_CODE_UPLOADED,
-                                       addon, version, request.user)
+                log_and_notify(amo.LOG.SOURCE_CODE_UPLOADED, None,
+                               request.user, version)
             else:
                 ActivityLog.create(amo.LOG.SOURCE_CODE_UPLOADED,
                                    addon, version, request.user)

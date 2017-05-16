@@ -3,15 +3,15 @@
   "version": "0.0.17",
   "private": true,
   "engines": {
-    "node": ">= 4",
-    "npm": ">= 1.1.x"
+    "node": ">= 6.0.0",
+    "npm": ">= 3.0.0"
   },
   "dependencies": {
-    "addons-linter": "0.19.1",
-    "clean-css": "4.0.12",
-    "clean-css-cli": "4.0.12",
+    "addons-linter": "0.19.2",
+    "clean-css": "4.1.1",
+    "clean-css-cli": "4.1.0",
     "less": "2.7.2",
     "stylus": "0.54.5",
-    "uglify-js": "2.8.22"
+    "uglify-js": "3.0.5"
   }
 }

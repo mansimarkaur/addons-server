@@ -122,24 +122,6 @@ def impala_paginator(pager):
     return jinja2.Markup(t.render({'pager': pager}))
 
 
-@register.filter
-def mobile_paginator(pager):
-    t = get_env().get_template('amo/mobile/paginator.html')
-    return jinja2.Markup(t.render({'pager': pager}))
-
-
-@register.filter
-def mobile_impala_paginator(pager):
-    # Impala-style paginator that is easier to mobilefy.
-    t = get_env().get_template('amo/mobile/impala_paginator.html')
-    return jinja2.Markup(t.render({'pager': pager}))
-
-
-@register.function
-def is_mobile(app):
-    return app == amo.MOBILE
-
-
 @register.function
 def sidebar(app):
     """Populates the sidebar with (categories, types)."""
@@ -271,19 +253,6 @@ def strip_controls(s):
 
 
 @register.filter
-def strip_html(s, just_kidding=False):
-    """Strips HTML.  Confirm lets us opt out easily."""
-    if just_kidding:
-        return s
-
-    if not s:
-        return ''
-    else:
-        s = re.sub(r'&lt;.*?&gt;', '', force_text(s, errors='ignore'))
-        return re.sub(r'<.*?>', '', s)
-
-
-@register.filter
 def external_url(url):
     """Bounce a URL off outgoing.prod.mozaws.net."""
     return urlresolvers.get_outgoing_url(unicode(url))
@@ -362,25 +331,6 @@ def is_choice_field(value):
         return isinstance(value.field.widget, CheckboxInput)
     except AttributeError:
         pass
-
-
-@register.inclusion_tag('amo/mobile/sort_by.html')
-def mobile_sort_by(base_url, options=None, selected=None, extra_sort_opts=None,
-                   search_filter=None):
-    if search_filter:
-        selected = search_filter.field
-        options = search_filter.opts
-        if hasattr(search_filter, 'extras'):
-            options += search_filter.extras
-    if extra_sort_opts:
-        options_dict = dict(options + extra_sort_opts)
-    else:
-        options_dict = dict(options)
-    if selected in options_dict:
-        current = options_dict[selected]
-    else:
-        selected, current = options[0]  # Default to the first option.
-    return locals()
 
 
 @register.function

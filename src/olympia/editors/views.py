@@ -7,6 +7,7 @@ from django import http
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.datastructures import SortedDict
@@ -28,9 +29,11 @@ from olympia.constants.base import REVIEW_LIMITED_DELAY_HOURS
 from olympia.constants.editors import REVIEWS_PER_PAGE, REVIEWS_PER_PAGE_MAX
 from olympia.editors import forms
 from olympia.editors.models import (
-    AddonCannedResponse, AutoApprovalSummary, EditorSubscription, EventLog,
-    get_flags, PerformanceGraph, ReviewerScore, ViewFullReviewQueue,
-    ViewPendingQueue, ViewUnlistedAllList)
+    AddonCannedResponse, AutoApprovalSummary, clear_reviewing_cache,
+    EditorSubscription, EventLog, get_flags, get_reviewing_cache,
+    get_reviewing_cache_key, PerformanceGraph, ReviewerScore,
+    set_reviewing_cache, ViewFullReviewQueue, ViewPendingQueue,
+    ViewUnlistedAllList)
 from olympia.editors.helpers import (
     AutoApprovedTable, is_limited_reviewer, ReviewHelper,
     ViewFullReviewQueueTable, ViewPendingQueueTable, ViewUnlistedAllListTable)
@@ -589,6 +592,7 @@ def _get_comments_for_hard_deleted_versions(addon):
         status = 'Deleted'
         deleted = True
         channel = amo.RELEASE_CHANNEL_LISTED
+        is_ready_for_auto_approval = False
 
         @property
         def created(self):
@@ -632,7 +636,8 @@ def review(request, addon, channel=None):
         return redirect(reverse('editors.queue'))
 
     form_helper = ReviewHelper(request=request, addon=addon, version=version)
-    form = forms.ReviewForm(request.POST or None, helper=form_helper)
+    form = forms.ReviewForm(request.POST if request.method == 'POST' else None,
+                            helper=form_helper)
     if channel == amo.RELEASE_CHANNEL_LISTED:
         queue_type = form.helper.handler.review_type
         redirect_url = reverse('editors.queue_%s' % queue_type)
@@ -644,11 +649,27 @@ def review(request, addon, channel=None):
                                           amo.permissions.ADDONS_POST_REVIEW)
 
     approvals_info = None
-    if is_post_reviewer:
-        try:
-            approvals_info = addon.addonapprovalscounter
-        except AddonApprovalsCounter.DoesNotExist:
-            pass
+    reports = None
+    user_reviews = None
+    was_auto_approved = False
+    if channel == amo.RELEASE_CHANNEL_LISTED:
+        if addon.current_version:
+            was_auto_approved = addon.current_version.was_auto_approved
+        if is_post_reviewer and version and version.is_webextension:
+            try:
+                approvals_info = addon.addonapprovalscounter
+            except AddonApprovalsCounter.DoesNotExist:
+                pass
+
+        developers = addon.listed_authors
+        reports = Paginator(
+            (AbuseReport.objects
+                        .filter(Q(addon=addon) | Q(user__in=developers))
+                        .order_by('-created')), 5).page(1)
+        user_reviews = Paginator(
+            (Review.without_replies
+                   .filter(addon=addon, rating__lte=3, body__isnull=False)
+                   .order_by('-created')), 5).page(1)
 
     if request.method == 'POST' and form.is_valid():
         form.helper.process()
@@ -683,10 +704,16 @@ def review(request, addon, channel=None):
     except Version.DoesNotExist:
         show_diff = None
 
-    # The actions we should show a minimal form from.
+    # The actions we should show a minimal form for.
     actions_minimal = [k for (k, a) in actions if not a.get('minimal')]
 
+    # The actions we should show the comments form for (contrary to minimal
+    # form above, it defaults to True, because most actions do need to have
+    # the comments form).
+    actions_comments = [k for (k, a) in actions if a.get('comments', True)]
+
     versions = (Version.unfiltered.filter(addon=addon, channel=channel)
+                                  .select_related('autoapprovalsummary')
                                   .exclude(files__status=amo.STATUS_BETA)
                                   .order_by('-created')
                                   .transform(Version.transformer_activity)
@@ -701,9 +728,33 @@ def review(request, addon, channel=None):
                       reverse=True)
 
     pager = amo.utils.paginate(request, all_versions, 10)
-
     num_pages = pager.paginator.num_pages
     count = pager.paginator.count
+
+    max_average_daily_users = int(
+        get_config('AUTO_APPROVAL_MAX_AVERAGE_DAILY_USERS') or 0),
+    min_approved_updates = int(
+        get_config('AUTO_APPROVAL_MIN_APPROVED_UPDATES') or 0)
+    auto_approval_info = {}
+    # Now that we've paginated the versions queryset, iterate on them to
+    # generate auto approvals info. Note that the variable should not clash
+    # the already existing 'version'.
+    for a_version in pager.object_list:
+        if not is_post_reviewer or not a_version.is_ready_for_auto_approval:
+            continue
+        try:
+            summary = a_version.autoapprovalsummary
+        except AutoApprovalSummary.DoesNotExist:
+            auto_approval_info[a_version.pk] = None
+            continue
+        # Call calculate_verdict() again, it will use the data already stored.
+        # Need to pass max_average_daily_users and min_approved_updates current
+        # values.
+        verdict_info = summary.calculate_verdict(
+            max_average_daily_users=max_average_daily_users,
+            min_approved_updates=min_approved_updates,
+            pretty=True)
+        auto_approval_info[a_version.pk] = verdict_info
 
     if version:
         flags = get_flags(version)
@@ -722,33 +773,17 @@ def review(request, addon, channel=None):
                   form=form, canned=canned, is_admin=is_admin,
                   show_diff=show_diff,
                   actions=actions, actions_minimal=actions_minimal,
+                  actions_comments=actions_comments,
                   whiteboard_form=forms.WhiteboardForm(instance=addon),
                   user_changes=user_changes_log,
                   unlisted=(channel == amo.RELEASE_CHANNEL_UNLISTED),
                   approvals_info=approvals_info,
-                  is_post_reviewer=is_post_reviewer)
+                  is_post_reviewer=is_post_reviewer,
+                  auto_approval_info=auto_approval_info,
+                  reports=reports, user_reviews=user_reviews,
+                  was_auto_approved=was_auto_approved)
 
     return render(request, 'editors/review.html', ctx)
-
-
-def get_reviewing_cache_key(addon_id):
-    return '%s:review_viewing:%s' % (settings.CACHE_PREFIX, addon_id)
-
-
-def clear_reviewing_cache(addon_id):
-    return cache.delete(get_reviewing_cache_key(addon_id))
-
-
-def get_reviewing_cache(addon_id):
-    return cache.get(get_reviewing_cache_key(addon_id))
-
-
-def set_reviewing_cache(addon_id, user_id):
-    # We want to save it for twice as long as the ping interval,
-    # just to account for latency and the like.
-    cache.set(get_reviewing_cache_key(addon_id),
-              user_id,
-              amo.EDITOR_VIEWING_INTERVAL * 2)
 
 
 @never_cache
@@ -867,7 +902,7 @@ def reviewlog(request):
                 Q(user__username__icontains=term)).distinct()
 
     pager = amo.utils.paginate(request, approvals, 50)
-    ad = {
+    action_dict = {
         amo.LOG.APPROVE_VERSION.id: _('was approved'),
         # The log will still show preliminary, even after the migration.
         amo.LOG.PRELIMINARY_VERSION.id: _('given preliminary review'),
@@ -877,9 +912,10 @@ def reviewlog(request):
         amo.LOG.REQUEST_INFORMATION.id: _('needs more information'),
         amo.LOG.REQUEST_SUPER_REVIEW.id: _('needs super review'),
         amo.LOG.COMMENT_VERSION.id: _('commented'),
+        amo.LOG.CONFIRM_AUTO_APPROVED.id: _('confirmed as approved'),
     }
 
-    data = context(request, form=form, pager=pager, ACTION_DICT=ad,
+    data = context(request, form=form, pager=pager, ACTION_DICT=action_dict,
                    motd_editable=motd_editable)
     return render(request, 'editors/reviewlog.html', data)
 
@@ -887,10 +923,11 @@ def reviewlog(request):
 @addons_reviewer_required
 @addon_view
 def abuse_reports(request, addon):
-    reports = AbuseReport.objects.filter(addon=addon).order_by('-created')
-    total = reports.count()
+    developers = addon.listed_authors
+    reports = AbuseReport.objects.filter(
+        Q(addon=addon) | Q(user__in=developers)).order_by('-created')
     reports = amo.utils.paginate(request, reports)
-    data = context(request, addon=addon, reports=reports, total=total)
+    data = context(request, addon=addon, reports=reports)
     return render(request, 'editors/abuse_reports.html', data)
 
 

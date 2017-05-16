@@ -38,19 +38,10 @@ def render(s, context=None):
     return t.render(context)
 
 
-def test_strip_html():
-    assert 'Hey Brother!' == render('{{ "Hey <b>Brother!</b>"|strip_html }}')
-
-
 def test_currencyfmt():
     assert helpers.currencyfmt(None, 'USD') == ''
     assert helpers.currencyfmt(5, 'USD') == '$5.00'
     assert helpers.currencyfmt('12', 'USD') == '$12.00'
-
-
-def test_strip_html_none():
-    assert '' == render('{{ a|strip_html }}', {'a': None})
-    assert '' == render('{{ a|strip_html(True) }}', {'a': None})
 
 
 def test_strip_controls():
@@ -486,22 +477,6 @@ def test_f():
     # This makes sure there's no UnicodeEncodeError when doing the string
     # interpolation.
     assert render(u'{{ "foo {0}"|f("baré") }}') == u'foo baré'
-
-
-def test_inline_css(monkeypatch):
-    jingo.load_helpers()
-    env = jingo.get_env()
-    t = env.from_string("{{ inline_css('zamboni/mobile', debug=True) }}")
-
-    # Monkeypatch settings.LESS_BIN to not call the less compiler. We don't
-    # need nor want it in tests.
-    monkeypatch.setattr(settings, 'LESS_BIN', 'ls')
-    # Monkeypatch jingo_minify.helpers.is_external to counter-effect the
-    # autouse fixture in conftest.py.
-    monkeypatch.setattr(amo.helpers, 'is_external', lambda css: False)
-    s = t.render()
-
-    assert 'background-image: url(/static/img/icons/stars.png);' in s
 
 
 class TestStoragePath(TestCase):

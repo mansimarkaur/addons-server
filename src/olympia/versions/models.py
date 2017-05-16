@@ -581,6 +581,32 @@ class Version(OnChangeMixin, ModelBase):
         """A File is unreviewed if its status is amo.STATUS_AWAITING_REVIEW."""
         return self.files.filter(status=amo.STATUS_AWAITING_REVIEW)
 
+    @property
+    def is_ready_for_auto_approval(self):
+        """Return whether or not this version could be *considered* for
+        auto-approval.
+
+        Does not necessarily mean that it would be auto-approved, just that it
+        passes the most basic criteria to be considered a candidate by the
+        auto_approve command."""
+        return (
+            self.addon.status == amo.STATUS_PUBLIC and
+            self.addon.type == amo.ADDON_EXTENSION and
+            self.is_webextension and
+            self.is_unreviewed and
+            self.channel == amo.RELEASE_CHANNEL_LISTED)
+
+    @property
+    def was_auto_approved(self):
+        """Return whether or not this version was auto-approved."""
+        from olympia.editors.models import AutoApprovalSummary
+        try:
+            return (self.is_public() and
+                    self.autoapprovalsummary.verdict == amo.AUTO_APPROVED)
+        except AutoApprovalSummary.DoesNotExist:
+            pass
+        return False
+
 
 @use_master
 def update_status(sender, instance, **kw):

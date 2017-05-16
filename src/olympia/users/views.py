@@ -9,7 +9,6 @@ from django.utils.http import is_safe_url
 from django.views.decorators.cache import never_cache
 from django.utils.translation import ugettext as _
 
-from mobility.decorators import mobile_template
 from session_csrf import anonymous_csrf, anonymous_csrf_exempt
 
 import olympia.core.logger
@@ -22,8 +21,7 @@ from olympia.addons.decorators import addon_view_factory
 from olympia.addons.models import Addon, Category
 from olympia.amo import messages
 from olympia.amo.decorators import (
-    json_view, login_required, permission_required,
-    post_required, write)
+    json_view, login_required, permission_required, write)
 from olympia.amo.forms import AbuseForm
 from olympia.amo.urlresolvers import get_url_prefix, reverse
 from olympia.amo.utils import escape_all, render
@@ -193,9 +191,8 @@ def _clean_next_url(request):
 
 
 @anonymous_csrf
-@mobile_template('users/{mobile/}login.html')
-def login(request, template=None):
-    return render(request, template)
+def login(request):
+    return render(request, 'users/login.html')
 
 
 def logout(request):
@@ -319,17 +316,6 @@ def report_abuse(request, user):
         return render(request, 'users/report_abuse_full.html',
                       {'profile': user, 'abuse_form': form})
     return redirect(user.get_url_path())
-
-
-@post_required
-@user_view
-def remove_locale(request, user):
-    """Remove a locale from the user's translations."""
-    POST = request.POST
-    if 'locale' in POST and POST['locale'] != settings.LANGUAGE_CODE:
-        user.remove_locale(POST['locale'])
-        return http.HttpResponse()
-    return http.HttpResponseBadRequest()
 
 
 @never_cache

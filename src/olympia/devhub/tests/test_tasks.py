@@ -438,7 +438,7 @@ class TestRunAddonsLinter(ValidatorTestCase):
 
             assert tmpf.call_count == 2
             assert result['success']
-            assert result['warnings'] == 22
+            assert result['warnings'] == 21
             assert not result['errors']
 
 
@@ -780,6 +780,27 @@ class TestNewLegacyAddonRestrictions(ValidatorTestCase):
         assert upload.processed_validation['errors'] == 0
         assert upload.processed_validation['messages'] == []
         assert upload.valid
+
+    def test_restrict_firefox_53_alpha(self):
+        data = {
+            'messages': [],
+            'errors': 0,
+            'metadata': {
+                'is_webextension': False,
+                'is_extension': True,
+                'strict_compatibility': True,
+                'applications': {
+                    'firefox': {
+                        'max': '53a1'
+                    }
+                }
+            }
+        }
+        results = tasks.annotate_new_legacy_addon_restrictions(data)
+        assert results['errors'] == 1
+        assert len(results['messages']) > 0
+        assert results['messages'][0]['id'] == [
+            'validation', 'messages', 'legacy_extensions_restricted']
 
 
 @mock.patch('olympia.devhub.tasks.send_html_mail_jinja')

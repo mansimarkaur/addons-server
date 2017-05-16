@@ -9,7 +9,6 @@ from django.utils import translation
 import pytest
 from mock import Mock, patch
 from pyquery import PyQuery as pq
-from waffle.testutils import override_switch
 
 from olympia import amo
 from olympia.activity.models import ActivityLog, ActivityLogToken
@@ -18,7 +17,7 @@ from olympia.amo.tests import TestCase, version_factory
 from olympia.addons.models import Addon, AddonApprovalsCounter
 from olympia.amo.urlresolvers import reverse
 from olympia.editors import helpers
-from olympia.editors.models import ReviewerScore
+from olympia.editors.models import AutoApprovalSummary, ReviewerScore
 from olympia.files.models import File
 from olympia.tags.models import Tag
 from olympia.translations.models import Translation
@@ -278,7 +277,8 @@ class TestReviewHelper(TestCase):
         self.file.update(status=file_status)
         self.addon.update(status=addon_status)
         # Need to clear self.version.all_files cache since we updated the file.
-        del self.version.all_files
+        if self.version:
+            del self.version.all_files
         return self.get_helper().actions
 
     def test_actions_full_nominated(self):
@@ -301,6 +301,30 @@ class TestReviewHelper(TestCase):
                 addon_status=amo.STATUS_PUBLIC,
                 file_status=file_status).keys() == expected
 
+    def test_actions_public_post_reviewer(self):
+        self.grant_permission(self.request.user, 'Addons:PostReview')
+        expected = ['info', 'super', 'comment']
+        assert self.get_review_actions(
+            addon_status=amo.STATUS_PUBLIC,
+            file_status=amo.STATUS_PUBLIC).keys() == expected
+
+        # Now make current version auto-approved...
+        AutoApprovalSummary.objects.create(
+            version=self.addon.current_version, verdict=amo.AUTO_APPROVED)
+        expected = ['confirm_auto_approved', 'info', 'super', 'comment']
+        assert self.get_review_actions(
+            addon_status=amo.STATUS_PUBLIC,
+            file_status=amo.STATUS_PUBLIC).keys() == expected
+
+    def test_actions_no_version(self):
+        """Deleted addons and addons with no versions in that channel have no
+        version set."""
+        expected = ['comment']
+        self.version = None
+        assert self.get_review_actions(
+            addon_status=amo.STATUS_PUBLIC,
+            file_status=amo.STATUS_PUBLIC).keys() == expected
+
     def test_set_files(self):
         self.file.update(datestatuschanged=yesterday)
         self.helper.set_data({'addon_files': self.version.files.all()})
@@ -317,20 +341,6 @@ class TestReviewHelper(TestCase):
         assert self.check_log_count(amo.LOG.APPROVE_VERSION.id) == 1
 
     def test_notify_email(self):
-        self.helper.set_data(self.get_data())
-        base_fragment = 'reply to this email or join #addon-reviewers'
-        legacy_cta_fragment = 'add-ons are compatible past Firefox 57'
-        for template in ('nominated_to_public', 'nominated_to_sandbox',
-                         'pending_to_public', 'pending_to_sandbox',
-                         'author_super_review', 'unlisted_to_reviewed_auto'):
-            mail.outbox = []
-            self.helper.handler.notify_email(template, 'Sample subject %s, %s')
-            assert len(mail.outbox) == 1
-            assert base_fragment in mail.outbox[0].body
-            assert legacy_cta_fragment in mail.outbox[0].body
-
-    @override_switch('activity-email', active=True)
-    def test_notify_email_activity_email(self):
         self.helper.set_data(self.get_data())
         base_fragment = 'If you need to send file attachments'
         legacy_cta_fragment = 'add-ons are compatible past Firefox 57'
@@ -704,6 +714,24 @@ class TestReviewHelper(TestCase):
 
         self._check_score(amo.REVIEWED_ADDON_UPDATE)
 
+    def test_public_addon_confirm_auto_approval(self):
+        self.setup_data(amo.STATUS_PUBLIC, file_status=amo.STATUS_PUBLIC)
+        AutoApprovalSummary.objects.create(
+            version=self.version, verdict=amo.AUTO_APPROVED)
+        self.create_paths()
+
+        # Safeguards.
+        assert self.addon.status == amo.STATUS_PUBLIC
+        assert self.file.status == amo.STATUS_PUBLIC
+        assert self.addon.current_version.files.all()[0].status == (
+            amo.STATUS_PUBLIC)
+
+        self.helper.handler.confirm_auto_approved()
+
+        approvals_counter = AddonApprovalsCounter.objects.get(addon=self.addon)
+        self.assertCloseToNow(approvals_counter.last_human_review)
+        assert self.check_log_count(amo.LOG.CONFIRM_AUTO_APPROVED.id) == 1
+
     @patch('olympia.editors.helpers.sign_file')
     def test_null_to_public_unlisted(self, sign_mock):
         sign_mock.reset()
@@ -836,6 +864,19 @@ class TestReviewHelper(TestCase):
         assert mail.outbox[0].subject == (
             ('Mozilla Add-ons: Delicious Bookmarks 2.1.072 flagged for '
              'Admin Review'))
+        assert self.check_log_count(amo.LOG.REQUEST_SUPER_REVIEW.id) == 1
+
+    def test_auto_approved_super_review(self):
+        self.setup_data(amo.STATUS_PUBLIC, file_status=amo.STATUS_PUBLIC)
+        AutoApprovalSummary.objects.create(
+            version=self.addon.current_version, verdict=amo.AUTO_APPROVED)
+        self.helper.handler.process_super_review()
+
+        assert self.addon.admin_review
+
+        assert len(mail.outbox) == 1
+        assert mail.outbox[0].subject == (
+            'Super review requested: Delicious Bookmarks')
         assert self.check_log_count(amo.LOG.REQUEST_SUPER_REVIEW.id) == 1
 
     def test_nomination_to_super_review_and_escalate(self):

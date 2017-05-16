@@ -19,7 +19,7 @@ from pyquery import PyQuery as pq
 
 from olympia import amo, core, reviews
 from olympia.amo.tests import (
-    addon_factory, TestCase, version_factory, user_factory)
+    addon_factory, file_factory, TestCase, version_factory, user_factory)
 from olympia.abuse.models import AbuseReport
 from olympia.access.models import Group, GroupUser
 from olympia.activity.models import ActivityLog
@@ -30,7 +30,7 @@ from olympia.amo.urlresolvers import reverse
 from olympia.constants.base import REVIEW_LIMITED_DELAY_HOURS
 from olympia.editors.models import (
     AutoApprovalSummary, EditorSubscription, ReviewerScore)
-from olympia.files.models import File, FileValidation
+from olympia.files.models import File, FileValidation, WebextPermission
 from olympia.reviews.models import Review, ReviewFlag
 from olympia.users.models import UserProfile
 from olympia.versions.models import ApplicationsVersions, AppVersion, Version
@@ -564,6 +564,16 @@ class TestHome(EditorTest):
         doc = pq(self.client.get(self.url).content)
         listed_stats = doc('#editors-stats-charts {0}'.format(selector)).eq(0)
         assert 'New Add-on (1)' in listed_stats.text()
+
+    def test_stat_display_name(self):
+        self.user.display_name = ''
+        core.set_user(self.user)
+        self.approve_reviews()
+
+        doc = pq(self.client.get(self.url).content)
+        cols = doc('#editors-stats .editor-stats-table').eq(1).find('td')
+        assert cols.eq(0).text() != self.user.display_name
+        assert cols.eq(0).text() == self.user.name
 
 
 class QueueTest(EditorTest):
@@ -1240,10 +1250,10 @@ class TestAutoApprovedQueue(QueueTest):
     def get_addon_latest_version(self, addon):
         """Method used by _test_results() to fetch the version that the queue
         is supposed to display. Overridden here because in our case, it's not
-        necessarily the latest available version - we want the latest one to
-        have been auto approved."""
-        return AutoApprovalSummary.objects.filter(
-            version__in=list(addon.versions.all())).latest('pk').version
+        necessarily the latest available version - we display the current
+        public version instead (which is not guaranteed to be the latest
+        auto-approved one, but good enough) for this page."""
+        return addon.current_version
 
     def generate_files(self):
         """Generate add-ons needed for these tests."""
@@ -2573,6 +2583,27 @@ class TestReview(ReviewBase):
             [u'Select a valid choice. public is not one of the available '
              u'choices.'])
 
+    def test_confirm_auto_approval_no_permission(self):
+        AutoApprovalSummary.objects.create(
+            version=self.addon.current_version, verdict=amo.AUTO_APPROVED)
+        self.login_as_editor()
+        response = self.client.post(
+            self.url, {'action': 'confirm_auto_approved'})
+        assert response.status_code == 200
+        # Nothing happened: the user did not have the permission to do that.
+        assert ActivityLog.objects.filter(
+            action=amo.LOG.CONFIRM_AUTO_APPROVED.id).count() == 0
+
+    def test_confirm_auto_approval_with_permission(self):
+        AutoApprovalSummary.objects.create(
+            version=self.addon.current_version, verdict=amo.AUTO_APPROVED)
+        self.login_as_senior_editor()
+        response = self.client.post(
+            self.url, {'action': 'confirm_auto_approved'})
+        assert response.status_code == 302
+        assert ActivityLog.objects.filter(
+            action=amo.LOG.CONFIRM_AUTO_APPROVED.id).count() == 1
+
     def test_user_changes_log(self):
         # Activity logs related to user changes should be displayed.
         # Create an activy log for each of the following: user addition, role
@@ -2663,6 +2694,7 @@ class TestReview(ReviewBase):
     def test_approvals_info(self):
         approval_info = AddonApprovalsCounter.objects.create(
             addon=self.addon, last_human_review=datetime.now(), counter=42)
+        self.file.update(is_webextension=True)
         response = self.client.get(self.url)
         doc = pq(response.content)
         # No permission: nothing displayed.
@@ -2683,13 +2715,105 @@ class TestReview(ReviewBase):
         assert not doc('.last-approval-date')
         assert not doc('.approval-counter')
 
+    def test_no_auto_approval_summaries_since_everything_is_public(self):
+        self.login_as_senior_editor()
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert not doc('.auto_approval')
+
+    def test_permissions_display(self):
+        permissions = ['bookmarks', 'high', 'voltage']
+        self.file.update(is_webextension=True)
+        WebextPermission.objects.create(
+            permissions=permissions,
+            file=self.file)
+        response = self.client.get(self.url)
+        info = pq(response.content)('#review-files .file-info div')
+        assert info.eq(1).text() == 'Permissions: ' + ', '.join(permissions)
+
+    def test_abuse_reports(self):
+        report = AbuseReport.objects.create(
+            addon=self.addon, message=u'Et mël mazim ludus.',
+            ip_address='10.1.2.3')
+        created_at = report.created.strftime('%B %e, %Y')
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert not doc('.abuse_reports')
+
+        self.login_as_senior_editor()
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert not doc('.abuse_reports')
+
+        AutoApprovalSummary.objects.create(
+            verdict=amo.AUTO_APPROVED, version=self.version)
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert doc('.abuse_reports')
+        assert (
+            doc('.abuse_reports').text() ==
+            u'anonymous [10.1.2.3] reported Public on %s Et mël mazim ludus.'
+            % created_at)
+
+    def test_abuse_reports_developers(self):
+        report = AbuseReport.objects.create(
+            user=self.addon.listed_authors[0], message=u'Foo, Bâr!',
+            ip_address='10.4.5.6')
+        created_at = report.created.strftime('%B %e, %Y')
+        AutoApprovalSummary.objects.create(
+            verdict=amo.AUTO_APPROVED, version=self.version)
+        self.login_as_senior_editor()
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert doc('.abuse_reports')
+        assert (
+            doc('.abuse_reports').text() ==
+            u'anonymous [10.4.5.6] reported regularuser التطب on %s Foo, Bâr!'
+            % created_at)
+
+    def test_user_reviews(self):
+        user = user_factory()
+        user_review = Review.objects.create(
+            body=u'Lôrem ipsum dolor', rating=3, ip_address='10.5.6.7',
+            addon=self.addon, user=user)
+        created_at = user_review.created.strftime('%B %e, %Y')
+        Review.objects.create(  # Review with no body, ignored.
+            rating=1, addon=self.addon, user=user_factory())
+        Review.objects.create(  # Reply to a review, ignored.
+            body='Replyyyyy', reply_to=user_review,
+            addon=self.addon, user=user_factory())
+        Review.objects.create(  # Review with high rating,, ignored.
+            body=u'Qui platônem temporibus in', rating=5, addon=self.addon,
+            user=user_factory())
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert not doc('.user_reviews')
+
+        self.login_as_senior_editor()
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert not doc('.user_reviews')
+
+        AutoApprovalSummary.objects.create(
+            verdict=amo.AUTO_APPROVED, version=self.version)
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert doc('.user_reviews')
+        assert (
+            doc('.user_reviews').text() ==
+            u'%s on %s [10.5.6.7] Rated 3 out of 5 stars Lôrem ipsum dolor' % (
+                user.username, created_at
+            )
+        )
+
 
 class TestReviewPending(ReviewBase):
 
     def setUp(self):
         super(TestReviewPending, self).setUp()
-        self.file = File.objects.create(version=self.version,
-                                        status=amo.STATUS_AWAITING_REVIEW)
+        self.file = file_factory(version=self.version,
+                                 status=amo.STATUS_AWAITING_REVIEW,
+                                 is_webextension=True)
         self.addon.update(status=amo.STATUS_PUBLIC)
 
     def pending_dict(self):
@@ -2752,6 +2876,36 @@ class TestReviewPending(ReviewBase):
         assert self.file.reload().status == amo.STATUS_PUBLIC
 
         assert mock_sign.called
+
+    def test_auto_approval_summary(self):
+        # Hard-delete a version, faking the right ActivityLog so that the view
+        # creates a PseudoVersion instance...
+        deleted_version = version_factory(addon=self.addon)
+        ActivityLog.create(
+            amo.LOG.REJECT_VERSION, self.addon,
+            version=deleted_version, details={
+                'comments': u'Eh, thîs is a deleted version'
+            }, user=user_factory(),
+        )
+        deleted_version.delete(hard=True)
+
+        # Now auto-approve the regular version left.
+        AutoApprovalSummary.objects.create(
+            version=self.version,
+            verdict=amo.NOT_AUTO_APPROVED,
+            uses_custom_csp=True
+        )
+        set_config('AUTO_APPROVAL_MAX_AVERAGE_DAILY_USERS', 10000)
+        set_config('AUTO_APPROVAL_MIN_APPROVED_UPDATES', 2)
+        self.login_as_senior_editor()
+        response = self.client.get(self.url)
+        doc = pq(response.content)
+        assert (
+            doc('.auto_approval li').eq(0).text() ==
+            'Has too few consecutive human-approved updates.')
+        assert (
+            doc('.auto_approval li').eq(1).text() ==
+            'Uses a custom CSP.')
 
 
 class TestEditorMOTD(EditorTest):
@@ -2870,19 +3024,24 @@ class TestAbuseReports(TestCase):
     fixtures = ['base/users', 'base/addon_3615']
 
     def setUp(self):
-        user = UserProfile.objects.all()[0]
-        AbuseReport.objects.create(addon_id=3615, message='woo')
-        AbuseReport.objects.create(addon_id=3615, message='yeah',
-                                   reporter=user)
+        addon = Addon.objects.get(pk=3615)
+        addon_developer = addon.listed_authors[0]
+        someone = UserProfile.objects.exclude(pk=addon_developer.pk)[0]
+        AbuseReport.objects.create(addon=addon, message=u'wôo')
+        AbuseReport.objects.create(addon=addon, message=u'yéah',
+                                   reporter=someone)
         # Make a user abuse report to make sure it doesn't show up.
-        AbuseReport.objects.create(user=user, message='hey now')
+        AbuseReport.objects.create(user=someone, message=u'hey nöw')
+        # Make a user abuse report for one of the add-on developers: it should
+        # show up.
+        AbuseReport.objects.create(user=addon_developer, message='bü!')
 
     def test_abuse_reports_list(self):
         assert self.client.login(email='admin@mozilla.com')
         r = self.client.get(reverse('editors.abuse_reports', args=['a3615']))
         assert r.status_code == 200
         # We see the two abuse reports created in setUp.
-        assert len(r.context['reports']) == 2
+        assert len(r.context['reports']) == 3
 
     def test_no_abuse_reports_link_for_unlisted_addons(self):
         """Unlisted addons aren't public, and thus have no abuse reports."""

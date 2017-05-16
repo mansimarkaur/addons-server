@@ -4,14 +4,10 @@ FROM centos:centos7
 RUN touch /addons-server-centos7-container
 
 ADD docker/mysql-community.gpg.key /etc/pki/rpm-gpg/RPM-GPG-KEY-mysql
-ADD docker/nodesource.gpg.key /etc/pki/rpm-gpg/RPM-GPG-KEY-nodesource
 ADD docker/git.gpg.key /etc/pki/rpm-gpg/RPM-GPG-KEY-git
 
 # For mysql-python dependencies
 ADD docker/mysql.repo /etc/yum.repos.d/mysql.repo
-
-# This is temporary until https://bugzilla.mozilla.org/show_bug.cgi?id=1226533
-ADD docker/nodesource.repo /etc/yum.repos.d/nodesource.repo
 
 # For git dependencies
 ADD docker/git.repo /etc/yum.repos.d/git.repo
@@ -35,8 +31,6 @@ RUN yum install -y \
         python-devel \
         # Git, because we're using git-checkout dependencies
         git \
-        # Nodejs for less, stylus, uglifyjs and others
-        nodejs \
         # Dependencies for mysql-python
         mysql-community-devel \
         mysql-community-client \
@@ -44,6 +38,10 @@ RUN yum install -y \
         epel-release \
         swig \
     && yum clean all
+
+# Install Nodejs (for less, stylus, uglifyjs and others) separately, because
+# it's part of epel which we just installed above.
+RUN yum install -y nodejs
 
 # Compile required locale
 RUN localedef -i en_US -f UTF-8 en_US.UTF-8
@@ -60,7 +58,9 @@ RUN yum install -y python-pip
 RUN pip install pyOpenSSL ndg-httpsclient pyasn1 certifi urllib3
 
 # ipython / ipdb for easier debugging, supervisor to run services
-RUN pip install ipython ipdb supervisor
+# Remove ipython version restriction when we move to python 3, see
+# https://github.com/mozilla/addons-server/issues/5380
+RUN pip install 'ipython<6' ipdb supervisor
 
 COPY . /code
 WORKDIR /code

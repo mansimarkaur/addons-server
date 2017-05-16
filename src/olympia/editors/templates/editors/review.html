@@ -116,6 +116,22 @@
               {% set record = record_version.activity_log %}
               {% include 'editors/includes/history.html' %}
             {% endfor %}
+            {% if version.pk in auto_approval_info %}
+              <tr>
+                <th>{{ _('Not Auto Approved Because') }} </th>
+                <td class="auto_approval">
+                  {% if auto_approval_info[version.pk] %}
+                    <ul>
+                    {% for info in auto_approval_info[version.pk] %}
+                      <li>{{ info }}</li>
+                    {% endfor %}
+                    </ul>
+                  {% else %}
+                    {{ _('Auto-Approval script has not run yet on this version.') }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
             {% if not version.releasenotes and not version.approvalnotes and not records %}
             <tr>
               <td class="no-activity">
@@ -152,12 +168,15 @@
         {{ _("You can still submit this form, however only do so if you know it won't conflict.") }}
       </div>
 
-      <label for="id_comments">{{ form.comments.label }}</label>
-      {{ form.comments }}
-      {{ form.comments.errors }}
-      <div class="review-actions-canned">
-        {{ _('Insert canned response...') }}
-        {{ form.canned_response }}
+      <div class="review-actions-section data-toggle"
+           data-value="{{ actions_comments|join("|") }}">
+        <label for="id_comments">{{ form.comments.label }}</label>
+        {{ form.comments }}
+        {{ form.comments.errors }}
+        <div class="review-actions-canned">
+          {{ _('Insert canned response...') }}
+          {{ form.canned_response }}
+        </div>
       </div>
 
       <div class="review-actions-section review-actions-files data-toggle"

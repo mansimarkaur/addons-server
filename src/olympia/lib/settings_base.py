@@ -221,12 +221,6 @@ SERVICES_DOMAIN = 'services.%s' % DOMAIN
 #   Example: https://services.addons.mozilla.org
 SERVICES_URL = 'http://%s' % SERVICES_DOMAIN
 
-# The domain of the mobile site.
-MOBILE_DOMAIN = 'm.%s' % DOMAIN
-
-# The full url of the mobile site.
-MOBILE_SITE_URL = 'http://%s' % MOBILE_DOMAIN
-
 # Filter IP addresses of allowed clients that can post email through the API.
 ALLOWED_CLIENTS_EMAIL_API = env.list('ALLOWED_CLIENTS_EMAIL_API', default=[])
 # Auth token required to authorize inbound email.
@@ -384,14 +378,10 @@ MIDDLEWARE_CLASSES = (
     'django_statsd.middleware.GraphiteRequestTimingMiddleware',
     'django_statsd.middleware.GraphiteMiddleware',
     'olympia.amo.middleware.SetRemoteAddrFromForwardedFor',
-    'olympia.amo.middleware.DockerflowMiddlewareWithoutViews',
 
     # AMO URL middleware is as high as possible to get locale/app aware URLs.
     'olympia.amo.middleware.LocaleAndAppURLMiddleware',
 
-    # Mobile detection should happen in Zeus.
-    'mobility.middleware.DetectMobileMiddleware',
-    'mobility.middleware.XMobileMiddleware',
     'olympia.amo.middleware.RemoveSlashMiddleware',
 
     'django.middleware.security.SecurityMiddleware',
@@ -653,16 +643,6 @@ MINIFY_BUNDLES = {
             'css/lib/syntaxhighlighter/shCoreDefault.css',
             'css/zamboni/files.css',
         ),
-        'zamboni/mobile': (
-            'css/zamboni/mobile.css',
-            'css/mobile/typography.less',
-            'css/mobile/forms.less',
-            'css/mobile/header.less',
-            'css/mobile/search.less',
-            'css/mobile/listing.less',
-            'css/mobile/footer.less',
-            'css/mobile/notifications.less',
-        ),
         'zamboni/admin': (
             'css/zamboni/admin-django.css',
             'css/zamboni/admin-mozilla.css',
@@ -900,27 +880,6 @@ MINIFY_BUNDLES = {
             'js/zamboni/files_templates.js',
             'js/zamboni/files.js',
         ),
-        'zamboni/mobile': (
-            'js/lib/jquery-1.12.0.js',
-            'js/lib/jquery.browser.js',
-            'js/lib/underscore.js',
-            'js/lib/jqmobile.js',
-            'js/lib/jquery.cookie.js',
-            'js/zamboni/browser.js',
-            'js/zamboni/init.js',
-            'js/impala/capabilities.js',
-            'js/zamboni/analytics.js',
-            'js/lib/format.js',
-            'js/zamboni/mobile/buttons.js',
-            'js/lib/truncate.js',
-            'js/zamboni/truncation.js',
-            'js/impala/footer.js',
-            'js/zamboni/personas_core.js',
-            'js/zamboni/mobile/personas.js',
-            'js/zamboni/helpers.js',
-            'js/zamboni/mobile/general.js',
-            'js/common/ratingwidget.js',
-        ),
         'zamboni/stats': (
             'js/lib/highcharts.src.js',
             'js/impala/stats/csv_keys.js',
@@ -987,7 +946,9 @@ REDIRECT_URL_ALLOW_LIST = ['addons.mozilla.org']
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 # See: https://github.com/mozilla/addons-server/issues/1789
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
-SESSION_COOKIE_AGE = 2592000
+# This value must be kept in sync with authTokenValidFor from addons-frontend:
+# https://github.com/mozilla/addons-frontend/blob/2f480b474fe13a676237fe76a1b2a057e4a2aac7/config/default-amo.js#L111
+SESSION_COOKIE_AGE = 2592000  # 30 days
 SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_DOMAIN = ".%s" % DOMAIN  # bug 608797
@@ -1546,11 +1507,6 @@ DEV_AGREEMENT_LAST_UPDATED = None
 # If you want to allow self-reviews for add-ons/apps, then enable this.
 # In production we do not want to allow this.
 ALLOW_SELF_REVIEWS = False
-
-# Modify the user-agents we check for in django-mobility
-# (Android has since changed its user agent).
-MOBILE_USER_AGENTS = ('mozilla.+mobile|android|fennec|iemobile|'
-                      'iphone|opera (?:mini|mobi)')
 
 # Credentials for accessing Google Analytics stats.
 GOOGLE_ANALYTICS_CREDENTIALS = {}

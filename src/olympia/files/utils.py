@@ -249,12 +249,14 @@ class RDFExtractor(object):
 
     def apps(self):
         rv = []
+        seen_apps = set()
         for ctx in self.rdf.objects(None, self.uri('targetApplication')):
             app = amo.APP_GUIDS.get(self.find('id', ctx))
             if not app:
                 continue
-            if app.guid not in amo.APP_GUIDS:
+            if app.guid not in amo.APP_GUIDS or app.id in seen_apps:
                 continue
+            seen_apps.add(app.id)
             try:
                 min_appver, max_appver = get_appversions(
                     app,
@@ -264,6 +266,7 @@ class RDFExtractor(object):
                 continue
             rv.append(Extractor.App(
                 appdata=app, id=app.id, min=min_appver, max=max_appver))
+
         return rv
 
 
@@ -920,10 +923,11 @@ def extract_translations(file_obj):
                 try:
                     data = source.read(fname)
                     messages[corrected_locale] = decode_json(data)
-
-                except KeyError:
-                    # thrown by `source.read` usually means the file doesn't
-                    # exist for some reason, we fail silently
+                except (ValueError, KeyError):
+                    # `ValueError` thrown by `decode_json` if the json is
+                    # invalid and `KeyError` thrown by `source.read`
+                    # usually means the file doesn't exist for some reason,
+                    # we fail silently
                     continue
     except IOError:
         pass

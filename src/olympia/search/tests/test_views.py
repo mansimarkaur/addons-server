@@ -83,12 +83,7 @@ class SearchBase(ESTestCaseWithAddons):
         assert response.status_code == 200
         doc = pq(response.content)
         if title:
-            if hasattr(self, 'MOBILE'):
-                menu = doc('#sort-menu')
-                assert menu.find('span').text() == title
-                assert menu.find('.selected').text() == title
-            else:
-                assert doc('#sorter .selected').text() == title
+            assert doc('#sorter .selected').text() == title
         if sort_by:
             results = response.context['pager'].object_list
             if sort_by == 'name':
@@ -149,18 +144,6 @@ class TestESSearch(SearchBase):
         r = self.client.get(urlparams(self.url, q='+'))
         assert r.status_code == 200
 
-    @amo.tests.mobile_test
-    def test_get_mobile(self):
-        r = self.client.get(self.url)
-        assert r.status_code == 200
-        self.assertTemplateUsed(r, 'search/mobile/results.html')
-
-    @amo.tests.mobile_test
-    def test_mobile_results_downloads(self):
-        r = self.client.get(urlparams(self.url, sort='downloads'))
-        assert pq(r.content)('#content .item .vital.downloads'), (
-            'Expected weekly downloads')
-
     def test_search_tools_omit_users(self):
         r = self.client.get(self.url, {'cat': '%s,5' % amo.ADDON_SEARCH})
         assert r.status_code == 200
@@ -191,28 +174,8 @@ class TestESSearch(SearchBase):
         self.check_sort_links('downloads', 'Weekly Downloads',
                               'weekly_downloads')
 
-    def test_mobile_results_sort_name(self):
+    def test_results_sort_name(self):
         self.check_sort_links('name', 'Name', 'name', reverse=False)
-
-    @amo.tests.mobile_test
-    def test_mobile_results_sort_default(self):
-        self.check_sort_links(None, 'Relevance', 'weekly_downloads')
-
-    @amo.tests.mobile_test
-    def test_mobile_results_sort_unknown(self):
-        self.check_sort_links('xxx', 'Relevance')
-
-    @amo.tests.mobile_test
-    def test_mobile_results_sort_users(self):
-        self.check_sort_links('users', 'Most Users', 'average_daily_users')
-
-    @amo.tests.mobile_test
-    def test_mobile_results_sort_rating(self):
-        self.check_sort_links('rating', 'Top Rated', 'bayesian_rating')
-
-    @amo.tests.mobile_test
-    def test_mobile_results_sort_newest(self):
-        self.check_sort_links('created', 'Newest', 'created')
 
     def test_legacy_redirects(self):
         r = self.client.get(self.url + '?sort=averagerating')
@@ -1246,5 +1209,4 @@ class TestSearchSuggestions(TestAjaxSearch):
         self.search_applications('q=FIREFOX', [amo.FIREFOX, amo.ANDROID])
         self.search_applications('q=firefox', [amo.FIREFOX, amo.ANDROID])
         self.search_applications('q=bird', [amo.THUNDERBIRD])
-        self.search_applications('q=mobile', [amo.MOBILE])
         self.search_applications('q=mozilla', [])
